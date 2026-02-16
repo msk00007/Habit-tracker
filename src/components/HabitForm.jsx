@@ -3,6 +3,21 @@ import { useHabits } from "../state/HabitContext.jsx";
 
 const colorPalette = ["#59a7ff", "#6dd3a9", "#f0b35c", "#e67fa2", "#8b7dff"];
 
+const habitSuggestions = [
+  { name: "Morning walk", description: "20-minute light walk", frequency: "Daily" },
+  { name: "Medication check", description: "Take medicines on time", frequency: "Daily" },
+  { name: "Breathing exercise", description: "10 minutes of deep breathing", frequency: "Daily" },
+  { name: "Meal planning", description: "Plan meals for next day", frequency: "Daily" },
+  { name: "Kitchen reset", description: "Clean kitchen before bed", frequency: "Daily" },
+  { name: "Budget tracking", description: "Log household expenses", frequency: "Weekdays" },
+  { name: "Focused study", description: "45-minute distraction-free study block", frequency: "Daily" },
+  { name: "Revision notes", description: "Review class notes for 15 minutes", frequency: "Weekdays" },
+  { name: "Practice problems", description: "Solve 10 questions", frequency: "3x per week" },
+  { name: "Top 3 priorities", description: "List and finish top tasks for the day", frequency: "Weekdays" },
+  { name: "Inbox zero sprint", description: "15-minute email cleanup", frequency: "Weekdays" },
+  { name: "Stand and stretch", description: "Short break every 2 hours", frequency: "Daily" },
+];
+
 const emptyForm = {
   name: "",
   description: "",
@@ -32,6 +47,20 @@ export default function HabitForm() {
   const handleChange = (event) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleNameChange = (event) => {
+    const value = event.target.value;
+    const matchedHabit = habitSuggestions.find(
+      (suggestion) => suggestion.name.toLowerCase() === value.toLowerCase()
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      name: value,
+      description: matchedHabit ? matchedHabit.description : prev.description,
+      frequency: matchedHabit ? matchedHabit.frequency : prev.frequency,
+    }));
   };
 
   const handleSubmit = (event) => {
@@ -66,11 +95,17 @@ export default function HabitForm() {
         <input
           type="text"
           name="name"
+          list="habit-name-suggestions"
           value={form.name}
-          onChange={handleChange}
+          onChange={handleNameChange}
           placeholder="Example: Morning walk"
           required
         />
+        <datalist id="habit-name-suggestions">
+          {habitSuggestions.map((suggestion) => (
+            <option key={suggestion.name} value={suggestion.name} />
+          ))}
+        </datalist>
       </label>
       <label>
         Description
