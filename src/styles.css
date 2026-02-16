@@ -401,6 +401,27 @@ a {
   gap: 8px;
 }
 
+.sheet-config__instructions {
+  border: 1px solid var(--border);
+  background: #faf8f5;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.sheet-config__instructions h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.sheet-config__instructions ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
 .sheet-config__form label {
   font-weight: 600;
 }

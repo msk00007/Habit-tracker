@@ -74,6 +74,16 @@ export default function SheetConfig() {
 
       {isAuthenticated && !isDemoMode && (
         <form className="sheet-config__form" onSubmit={handleSubmit}>
+          {!hasSheet && (
+            <div className="sheet-config__instructions">
+              <h3>How to link your Google Sheet</h3>
+              <ol>
+                <li>Open Google Sheets and create or open a sheet.</li>
+                <li>Copy the Sheet ID from the URL between <code>/d/</code> and <code>/edit</code>.</li>
+                <li>Paste that ID below and click <strong>Connect sheet</strong>.</li>
+              </ol>
+            </div>
+          )}
           <label htmlFor="sheet-id-input">Sheet ID</label>
           <input
             id="sheet-id-input"
