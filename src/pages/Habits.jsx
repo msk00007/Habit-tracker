@@ -12,6 +12,7 @@ import {
 import { useHabits } from "../state/HabitContext.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
+const REMINDER_CACHE_KEY = "habit_tracker_sent_reminder_keys";
 
 const formatTimeLabel = (date) => {
   try {
@@ -49,6 +50,27 @@ const showHabitNotification = async (body, tag) => {
   }
 };
 
+const readSentReminderKeys = () => {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(REMINDER_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const persistSentReminderKeys = (keysMap) => {
+  if (typeof window === "undefined") return;
+  const today = todayISO();
+  const next = Object.fromEntries(
+    Object.entries(keysMap).filter(([key, isSent]) => Boolean(isSent) && key.includes(`-${today}-`))
+  );
+  window.localStorage.setItem(REMINDER_CACHE_KEY, JSON.stringify(next));
+};
+
 export default function Habits() {
   const {
     hasSheet,
@@ -62,7 +84,7 @@ export default function Habits() {
   } = useHabits();
   const [permissionState, setPermissionState] = useState("unsupported");
   const [reminderText, setReminderText] = useState("");
-  const lastReminderRef = useRef({});
+  const lastReminderRef = useRef(readSentReminderKeys());
   const oneSignalEnabled = isOneSignalConfigured();
 
   useEffect(() => {
@@ -131,6 +153,7 @@ export default function Habits() {
 
         await showHabitNotification(message, reminderKey);
         lastReminderRef.current[reminderKey] = true;
+        persistSentReminderKeys(lastReminderRef.current);
       }
 
       if (latestMessage) setReminderText(latestMessage);
