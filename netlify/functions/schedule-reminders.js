@@ -1,4 +1,4 @@
-const ONE_SIGNAL_API_URL = "https://onesignal.com/api/v1/notifications";
+const ONE_SIGNAL_API_URL = "https://api.onesignal.com/notifications";
 const MAX_REMINDERS_PER_REQUEST = 80;
 
 const json = (statusCode, body) => ({
@@ -15,11 +15,42 @@ const parseBody = (raw) => {
   }
 };
 
+const toUuid = (seed) => {
+  const source = String(seed || "").trim();
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source)
+  ) {
+    return source.toLowerCase();
+  }
+
+  let hash = 2166136261;
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  const chunk = (value) => (value >>> 0).toString(16).padStart(8, "0");
+  const h1 = chunk(hash);
+  const h2 = chunk(hash ^ 0x9e3779b9);
+  const h3 = chunk(hash ^ 0x85ebca6b);
+  const h4 = chunk(hash ^ 0xc2b2ae35);
+  const hex = `${h1}${h2}${h3}${h4}`.slice(0, 32);
+
+  const timeLow = hex.slice(0, 8);
+  const timeMid = hex.slice(8, 12);
+  const timeHi = `4${hex.slice(13, 16)}`;
+  const clockSeqRaw = parseInt(hex.slice(16, 20), 16);
+  const clockSeq = ((clockSeqRaw & 0x3fff) | 0x8000).toString(16).padStart(4, "0");
+  const node = hex.slice(20, 32);
+  return `${timeLow}-${timeMid}-${timeHi}-${clockSeq}-${node}`;
+};
+
 const toAuthHeader = (rawKey) => {
   const key = String(rawKey || "").trim();
   if (!key) return "";
-  if (key.startsWith("Basic ") || key.startsWith("Key ")) return key;
-  return `Basic ${key}`;
+  if (key.startsWith("Key ") || key.startsWith("key ")) return `Key ${key.slice(4).trim()}`;
+  if (key.startsWith("Basic ")) return key;
+  return `Key ${key}`;
 };
 
 export const handler = async (event) => {
@@ -60,6 +91,7 @@ export const handler = async (event) => {
     const sendAfter = typeof reminder.sendAfter === "string" ? reminder.sendAfter : "";
     const idempotencyKey =
       typeof reminder.idempotencyKey === "string" ? reminder.idempotencyKey.trim() : "";
+    const uuidIdempotencyKey = toUuid(idempotencyKey);
     const sendAfterDate = new Date(sendAfter);
 
     if (!message || !sendAfter || !idempotencyKey || Number.isNaN(sendAfterDate.getTime())) {
@@ -83,7 +115,7 @@ export const handler = async (event) => {
           contents: { en: message },
           url: "/",
           send_after: sendAfterDate.toUTCString(),
-          idempotency_key: idempotencyKey,
+          idempotency_key: uuidIdempotencyKey,
         }),
       });
 
