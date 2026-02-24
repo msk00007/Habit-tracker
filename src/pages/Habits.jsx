@@ -3,6 +3,12 @@ import { FaBell } from "react-icons/fa6";
 import HabitForm from "../components/HabitForm.jsx";
 import HabitList from "../components/HabitList.jsx";
 import SheetConfig from "../components/SheetConfig.jsx";
+import {
+  getNotificationPermissionState,
+  initOneSignal,
+  isOneSignalConfigured,
+  requestOneSignalPermission,
+} from "../lib/oneSignal.js";
 import { useHabits } from "../state/HabitContext.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
@@ -54,11 +60,32 @@ export default function Habits() {
     getScheduleMinutes,
     isTimedHabitScheduledOnDate,
   } = useHabits();
-  const [permissionState, setPermissionState] = useState(
-    canUseWebNotifications() ? window.Notification.permission : "unsupported"
-  );
+  const [permissionState, setPermissionState] = useState("unsupported");
   const [reminderText, setReminderText] = useState("");
   const lastReminderRef = useRef({});
+  const oneSignalEnabled = isOneSignalConfigured();
+
+  useEffect(() => {
+    let active = true;
+
+    const initNotifications = async () => {
+      if (!canUseWebNotifications()) {
+        if (active) setPermissionState("unsupported");
+        return;
+      }
+
+      if (oneSignalEnabled) {
+        await initOneSignal();
+      }
+      const permission = await getNotificationPermissionState();
+      if (active) setPermissionState(permission);
+    };
+
+    void initNotifications();
+    return () => {
+      active = false;
+    };
+  }, [oneSignalEnabled]);
 
   const activeTimedHabits = useMemo(() => {
     const today = todayISO();
@@ -117,8 +144,7 @@ export default function Habits() {
   }, [activeTimedHabits, getTimedDailyGoal, getTimedProgressCount, getScheduleMinutes, permissionState]);
 
   const requestNotifications = async () => {
-    if (!canUseWebNotifications()) return;
-    const permission = await window.Notification.requestPermission();
+    const permission = await requestOneSignalPermission();
     setPermissionState(permission);
   };
 
@@ -146,12 +172,16 @@ export default function Habits() {
               </div>
               <p className="mt-2 text-sm text-slate-600">
                 {permissionState === "granted"
-                  ? "Browser notifications are enabled for timed habits."
+                  ? oneSignalEnabled
+                    ? "Push notifications are enabled with OneSignal."
+                    : "Browser notifications are enabled for timed habits."
                   : permissionState === "denied"
                     ? "Browser notifications are blocked. You can allow them in browser settings."
                     : permissionState === "unsupported"
                       ? "Notifications need a secure context (HTTPS or localhost) and browser support."
-                      : "Enable notifications to get timely reminders."}
+                      : oneSignalEnabled
+                        ? "Enable notifications to subscribe this device for OneSignal push alerts."
+                        : "Enable notifications to get timely reminders."}
               </p>
               {reminderText && (
                 <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{reminderText}</div>
