@@ -127,7 +127,7 @@ export default function Habits() {
     const schedulePushReminders = async () => {
       const subscriptionId = await getOneSignalSubscriptionId();
       if (!subscriptionId || cancelled) {
-        if (!cancelled) setScheduleStatus("Push scheduling skipped: subscription id not ready.");
+        if (!cancelled) setScheduleStatus("Unable to sync push reminders right now.");
         return;
       }
 
@@ -155,7 +155,7 @@ export default function Habits() {
       }
 
       if (reminders.length === 0 || cancelled) {
-        if (!cancelled) setScheduleStatus("No upcoming slots to schedule right now.");
+        if (!cancelled) setScheduleStatus("");
         return;
       }
 
@@ -167,22 +167,14 @@ export default function Habits() {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {
-          setScheduleStatus(
-            `Push scheduling failed (${response.status}): ${data?.error ?? "function error"}`
-          );
+          setScheduleStatus("Unable to sync push reminders right now.");
           return;
         }
         const scheduled = Number(data?.scheduled ?? 0);
         const failed = Number(data?.failed ?? 0);
-        const firstFailureReason =
-          Array.isArray(data?.failures) && data.failures.length > 0
-            ? String(data.failures[0]?.reason ?? "").slice(0, 220)
-            : "";
-        setScheduleStatus(
-          `Scheduled ${scheduled} push reminder(s). Failed ${failed}.${firstFailureReason ? ` First error: ${firstFailureReason}` : ""}`
-        );
+        setScheduleStatus(scheduled > 0 && failed === 0 ? "Push reminders synced." : "Unable to sync push reminders right now.");
       } catch {
-        setScheduleStatus("Push scheduling failed: network/function error.");
+        setScheduleStatus("Unable to sync push reminders right now.");
       }
     };
 

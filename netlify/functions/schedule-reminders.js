@@ -1,5 +1,6 @@
 const ONE_SIGNAL_API_URL = "https://api.onesignal.com/notifications";
 const MAX_REMINDERS_PER_REQUEST = 80;
+const MAX_BODY_BYTES = 100_000;
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -12,6 +13,14 @@ const parseBody = (raw) => {
     return JSON.parse(raw || "{}");
   } catch {
     return {};
+  }
+};
+
+const normalizeOrigin = (origin) => {
+  try {
+    return new URL(origin).origin;
+  } catch {
+    return "";
   }
 };
 
@@ -58,6 +67,16 @@ export const handler = async (event) => {
     return json(405, { error: "Method not allowed" });
   }
 
+  const origin = normalizeOrigin(event.headers?.origin || event.headers?.Origin || "");
+  const allowedOrigin = normalizeOrigin(process.env.URL || process.env.DEPLOY_PRIME_URL || "");
+  if (origin && allowedOrigin && origin !== allowedOrigin) {
+    return json(403, { error: "Forbidden" });
+  }
+
+  if ((event.body || "").length > MAX_BODY_BYTES) {
+    return json(413, { error: "Payload too large" });
+  }
+
   const appId = process.env.VITE_ONESIGNAL_APP_ID || process.env.ONESIGNAL_APP_ID;
   const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
   const authHeader = toAuthHeader(restApiKey);
@@ -73,7 +92,7 @@ export const handler = async (event) => {
     typeof payload.subscriptionId === "string" ? payload.subscriptionId.trim() : "";
   const reminders = Array.isArray(payload.reminders) ? payload.reminders : [];
 
-  if (!subscriptionId) {
+  if (!/^[a-f0-9-]{20,}$/i.test(subscriptionId)) {
     return json(400, { error: "subscriptionId is required" });
   }
   if (reminders.length === 0) {
