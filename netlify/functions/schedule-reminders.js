@@ -15,6 +15,13 @@ const parseBody = (raw) => {
   }
 };
 
+const toAuthHeader = (rawKey) => {
+  const key = String(rawKey || "").trim();
+  if (!key) return "";
+  if (key.startsWith("Basic ") || key.startsWith("Key ")) return key;
+  return `Basic ${key}`;
+};
+
 export const handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return json(405, { error: "Method not allowed" });
@@ -22,6 +29,7 @@ export const handler = async (event) => {
 
   const appId = process.env.VITE_ONESIGNAL_APP_ID || process.env.ONESIGNAL_APP_ID;
   const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
+  const authHeader = toAuthHeader(restApiKey);
   if (!appId || !restApiKey) {
     return json(500, {
       error: "Missing OneSignal server env vars",
@@ -64,7 +72,7 @@ export const handler = async (event) => {
       const response = await fetch(ONE_SIGNAL_API_URL, {
         method: "POST",
         headers: {
-          Authorization: `Key ${restApiKey}`,
+          Authorization: authHeader,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
