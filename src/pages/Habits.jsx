@@ -112,6 +112,11 @@ export default function Habits() {
     };
   }, [oneSignalEnabled]);
 
+  const activeTimedHabits = useMemo(() => {
+    const today = todayISO();
+    return habits.filter((habit) => habit.type === "timed" && isTimedHabitScheduledOnDate(habit, today));
+  }, [habits, isTimedHabitScheduledOnDate]);
+
   useEffect(() => {
     if (!oneSignalEnabled || permissionState !== "granted") return;
     if (activeTimedHabits.length === 0) return;
@@ -163,11 +168,6 @@ export default function Habits() {
       cancelled = true;
     };
   }, [activeTimedHabits, getScheduleMinutes, oneSignalEnabled, permissionState]);
-
-  const activeTimedHabits = useMemo(() => {
-    const today = todayISO();
-    return habits.filter((habit) => habit.type === "timed" && isTimedHabitScheduledOnDate(habit, today));
-  }, [habits, isTimedHabitScheduledOnDate]);
 
   useEffect(() => {
     if (permissionState === "unsupported") return undefined;
