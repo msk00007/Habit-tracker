@@ -151,10 +151,11 @@ export default function SheetConfig() {
           </label>
           <input
             id="sheet-id-input"
-            type="text"
+            type="password"
             value={inputValue}
             onChange={(event) => setInputValue(event.target.value)}
             placeholder="1AbC...your-sheet-id"
+            autoComplete="off"
             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none ring-cyan-300 focus:ring"
           />
           <div className="flex flex-wrap gap-2">
