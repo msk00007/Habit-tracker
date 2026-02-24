@@ -87,6 +87,7 @@ export default function Habits() {
   } = useHabits();
   const [permissionState, setPermissionState] = useState("unsupported");
   const [reminderText, setReminderText] = useState("");
+  const [scheduleStatus, setScheduleStatus] = useState("");
   const lastReminderRef = useRef(readSentReminderKeys());
   const oneSignalEnabled = isOneSignalConfigured();
 
@@ -125,7 +126,10 @@ export default function Habits() {
 
     const schedulePushReminders = async () => {
       const subscriptionId = await getOneSignalSubscriptionId();
-      if (!subscriptionId || cancelled) return;
+      if (!subscriptionId || cancelled) {
+        if (!cancelled) setScheduleStatus("Push scheduling skipped: subscription id not ready.");
+        return;
+      }
 
       const now = new Date();
       const today = todayISO();
@@ -150,16 +154,29 @@ export default function Habits() {
         if (reminders.length >= MAX_PUSH_REMINDERS_PER_SYNC) break;
       }
 
-      if (reminders.length === 0 || cancelled) return;
+      if (reminders.length === 0 || cancelled) {
+        if (!cancelled) setScheduleStatus("No upcoming slots to schedule right now.");
+        return;
+      }
 
       try {
-        await fetch(REMINDER_SCHEDULE_ENDPOINT, {
+        const response = await fetch(REMINDER_SCHEDULE_ENDPOINT, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ subscriptionId, reminders }),
         });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setScheduleStatus(
+            `Push scheduling failed (${response.status}): ${data?.error ?? "function error"}`
+          );
+          return;
+        }
+        const scheduled = Number(data?.scheduled ?? 0);
+        const failed = Number(data?.failed ?? 0);
+        setScheduleStatus(`Scheduled ${scheduled} push reminder(s). Failed ${failed}.`);
       } catch {
-        // Scheduling failures should not block UI usage.
+        setScheduleStatus("Push scheduling failed: network/function error.");
       }
     };
 
@@ -263,6 +280,9 @@ export default function Habits() {
               </p>
               {reminderText && (
                 <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{reminderText}</div>
+              )}
+              {scheduleStatus && (
+                <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">{scheduleStatus}</div>
               )}
             </div>
             <HabitList />

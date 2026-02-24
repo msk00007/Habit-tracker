@@ -135,8 +135,21 @@ export const getOneSignalSubscriptionId = async () => {
   return new Promise((resolve) => {
     ensureDeferredQueue().push(async (OneSignal) => {
       try {
-        const subscriptionId = OneSignal?.User?.PushSubscription?.id;
-        resolve(typeof subscriptionId === "string" ? subscriptionId : "");
+        try {
+          await OneSignal?.User?.PushSubscription?.optIn?.();
+        } catch {
+          // Ignore opt-in issues; we still try to read the ID.
+        }
+
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+          const subscriptionId = OneSignal?.User?.PushSubscription?.id;
+          if (typeof subscriptionId === "string" && subscriptionId.trim()) {
+            resolve(subscriptionId.trim());
+            return;
+          }
+          await new Promise((retryResolve) => window.setTimeout(retryResolve, 500));
+        }
+        resolve("");
       } catch {
         resolve("");
       }
