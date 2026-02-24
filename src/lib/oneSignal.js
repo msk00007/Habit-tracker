@@ -66,9 +66,8 @@ export const initOneSignal = async () => {
               await OneSignal.init({
                 appId: ONE_SIGNAL_APP_ID,
                 allowLocalhostAsSecureOrigin: true,
-                serviceWorkerPath: "/onesignal/OneSignalSDKWorker.js",
-                serviceWorkerUpdaterPath: "/onesignal/OneSignalSDKUpdaterWorker.js",
-                serviceWorkerParam: { scope: "/onesignal/" },
+                serviceWorkerPath: "/OneSignalSDKWorker.js",
+                serviceWorkerUpdaterPath: "/OneSignalSDKUpdaterWorker.js",
                 notifyButton: { enable: false },
               });
               resolve(true);
@@ -109,10 +108,18 @@ export const requestOneSignalPermission = async () => {
     ensureDeferredQueue().push(async (OneSignal) => {
       try {
         await OneSignal.Notifications.requestPermission();
+        await OneSignal.User.PushSubscription.optIn();
         resolve(normalizePermissionState(OneSignal.Notifications.permission));
       } catch {
         try {
           const permission = await window.Notification.requestPermission();
+          if (permission === "granted") {
+            try {
+              await OneSignal.User.PushSubscription.optIn();
+            } catch {
+              // Ignore OneSignal opt-in failures and return browser state.
+            }
+          }
           resolve(normalizePermissionState(permission));
         } catch {
           resolve("denied");
