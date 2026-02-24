@@ -1,25 +1,138 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { FaBell } from "react-icons/fa6";
 import HabitForm from "../components/HabitForm.jsx";
 import HabitList from "../components/HabitList.jsx";
 import SheetConfig from "../components/SheetConfig.jsx";
 import { useHabits } from "../state/HabitContext.jsx";
 
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
 export default function Habits() {
-  const { hasSheet, isAuthenticated, isDemoMode } = useHabits();
+  const {
+    hasSheet,
+    isAuthenticated,
+    isDemoMode,
+    habits,
+    getTimedDailyGoal,
+    getTimedProgressCount,
+    getScheduleMinutes,
+    isTimedHabitScheduledOnDate,
+  } = useHabits();
+  const [permissionState, setPermissionState] = useState(
+    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported"
+  );
+  const [reminderText, setReminderText] = useState("");
+  const lastReminderRef = useRef({});
+
+  const activeTimedHabits = useMemo(() => {
+    const today = todayISO();
+    return habits.filter((habit) => habit.type === "timed" && isTimedHabitScheduledOnDate(habit, today));
+  }, [habits, isTimedHabitScheduledOnDate]);
+
+  useEffect(() => {
+    if (permissionState === "unsupported") return undefined;
+
+    const runReminderCheck = () => {
+      const now = new Date();
+      const today = todayISO();
+      let latestMessage = "";
+
+      activeTimedHabits.forEach((habit) => {
+        const goal = getTimedDailyGoal(habit, today);
+        const progress = getTimedProgressCount(habit, today);
+        if (progress >= goal) return;
+
+        const scheduleMinutes = getScheduleMinutes(habit);
+        if (scheduleMinutes.length === 0) return;
+
+        const slotTimes = scheduleMinutes.map((minuteOfDay) => {
+          const slot = new Date(`${today}T00:00:00`);
+          slot.setHours(Math.floor(minuteOfDay / 60), minuteOfDay % 60, 0, 0);
+          return slot;
+        });
+        const dueSlots = slotTimes.filter((slot) => slot <= now);
+        if (dueSlots.length === 0) return;
+
+        const expectedNow = Math.min(goal, dueSlots.length);
+        if (progress >= expectedNow) return;
+
+        const reminderKey = `${habit.id}-${today}-${expectedNow}`;
+        if (lastReminderRef.current[reminderKey]) return;
+
+        const dueTime = dueSlots[dueSlots.length - 1].toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+        const nextSlot = slotTimes.find((slot) => slot > now);
+        const nextLabel = nextSlot ? nextSlot.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "none";
+        const behindBy = expectedNow - progress;
+        const message = `${habit.name}: check-in due at ${dueTime}. Logged ${progress}/${goal}, behind by ${behindBy}. Next at ${nextLabel}.`;
+        latestMessage = message;
+
+        if (typeof window !== "undefined" && window.Notification?.permission === "granted") {
+          new window.Notification("Habit reminder", { body: message });
+        }
+        lastReminderRef.current[reminderKey] = true;
+      });
+
+      if (latestMessage) setReminderText(latestMessage);
+    };
+
+    runReminderCheck();
+    const intervalId = window.setInterval(runReminderCheck, 60000);
+    return () => window.clearInterval(intervalId);
+  }, [activeTimedHabits, getTimedDailyGoal, getTimedProgressCount, getScheduleMinutes, permissionState]);
+
+  const requestNotifications = async () => {
+    if (typeof window === "undefined" || !window.Notification) return;
+    const permission = await window.Notification.requestPermission();
+    setPermissionState(permission);
+  };
 
   return (
-    <section className="habits-layout">
+    <section className="grid gap-4">
       <SheetConfig />
       {(isDemoMode || isAuthenticated) && hasSheet ? (
-        <div className="habits-page">
+        <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
           <HabitForm />
-          <HabitList />
+          <div className="grid gap-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="inline-flex items-center gap-2 text-base font-semibold text-slate-900">
+                  <FaBell /> Reminders
+                </h3>
+                {permissionState === "default" && (
+                  <button
+                    type="button"
+                    className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+                    onClick={requestNotifications}
+                  >
+                    Enable notifications
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 text-sm text-slate-600">
+                {permissionState === "granted"
+                  ? "Browser notifications are enabled for timed habits."
+                  : permissionState === "denied"
+                    ? "Browser notifications are blocked. You can allow them in browser settings."
+                    : permissionState === "unsupported"
+                      ? "This browser does not support notifications."
+                      : "Enable notifications to get timely reminders."}
+              </p>
+              {reminderText && (
+                <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{reminderText}</div>
+              )}
+            </div>
+            <HabitList />
+          </div>
         </div>
       ) : isAuthenticated && !isDemoMode ? (
-        <div className="card empty">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600 shadow-sm">
           Enter your Google Sheet ID to load and manage your habits.
         </div>
       ) : (
-        <div className="card empty">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600 shadow-sm">
           Sign in with Google or try demo mode to start using HabitTracker.
         </div>
       )}

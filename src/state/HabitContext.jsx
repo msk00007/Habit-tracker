@@ -14,20 +14,202 @@ const HABIT_HEADERS = [
   "frequency",
   "color",
   "completions_json",
+  "type",
+  "interval_minutes",
+  "start_time",
+  "end_time",
+  "skip_weekdays_json",
+  "skipped_dates_json",
+  "timed_logs_json",
+  "target_date_legacy",
+  "interval_hours_legacy",
+  "timed_progress_json_legacy",
 ];
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const SHEETS_API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 
-const normalizeHabit = (habit) => ({
-  id: habit.id ?? `h${Date.now()}`,
-  name: habit.name ?? "",
-  description: habit.description ?? "",
-  frequency: habit.frequency ?? "Daily",
-  color: habit.color ?? "#59a7ff",
-  completions: habit.completions ?? {},
-});
+const parseTimeToMinutes = (timeValue) => {
+  if (typeof timeValue !== "string" || !timeValue.includes(":")) return null;
+  const [rawHours, rawMinutes] = timeValue.split(":");
+  const hours = Number(rawHours);
+  const minutes = Number(rawMinutes);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return null;
+  }
+  return hours * 60 + minutes;
+};
+
+const getScheduleMinutes = (habit) => {
+  const interval = Number(habit?.intervalMinutes ?? 30);
+  if (!Number.isFinite(interval) || interval < 1) return [];
+
+  const startMinutes = parseTimeToMinutes(habit?.startTime ?? "09:00");
+  const endMinutes = parseTimeToMinutes(habit?.endTime ?? "21:00");
+  if (startMinutes === null || endMinutes === null) return [];
+  if (endMinutes <= startMinutes) return [];
+
+  const slots = [];
+  for (let minute = startMinutes; minute <= endMinutes; minute += interval) {
+    slots.push(minute);
+  }
+  return slots;
+};
+
+const getNormalizedTimedLogsForDate = (habit, date) => {
+  const schedule = getScheduleMinutes(habit);
+  const maxSlotIndex = Math.max(0, schedule.length - 1);
+  const rawLogs = Array.isArray(habit?.timedLogs?.[date]) ? habit.timedLogs[date] : [];
+
+  const normalizedSlotIndices = rawLogs
+    .map((entry, index) => {
+      if (entry && typeof entry === "object" && Number.isInteger(entry.slotIndex)) {
+        return entry.slotIndex;
+      }
+      if (typeof entry === "string") {
+        return index;
+      }
+      return null;
+    })
+    .filter((slotIndex) => Number.isInteger(slotIndex) && slotIndex >= 0 && slotIndex <= maxSlotIndex);
+
+  return [...new Set(normalizedSlotIndices)].sort((a, b) => a - b);
+};
+
+const getTimedLogState = (habit, date = todayISO()) => {
+  const scheduled = isTimedHabitScheduledOnDate(habit, date);
+  const schedule = getScheduleMinutes(habit);
+  const completedSlotIndices = getNormalizedTimedLogsForDate(habit, date);
+  const completedSet = new Set(completedSlotIndices);
+
+  if (!scheduled || schedule.length === 0) {
+    return {
+      canLogNow: false,
+      reason: "not_scheduled",
+      activeSlotIndex: -1,
+      completedSlotIndices,
+      schedule,
+    };
+  }
+
+  if (date !== todayISO()) {
+    return {
+      canLogNow: false,
+      reason: "date_locked",
+      activeSlotIndex: -1,
+      completedSlotIndices,
+      schedule,
+    };
+  }
+
+  const interval = Number(habit?.intervalMinutes ?? 30);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const activeSlotIndex = schedule.findIndex(
+    (slotStart) => nowMinutes >= slotStart && nowMinutes < slotStart + interval
+  );
+
+  if (activeSlotIndex === -1) {
+    return {
+      canLogNow: false,
+      reason: nowMinutes < schedule[0] ? "before_start" : "outside_slot",
+      activeSlotIndex: -1,
+      completedSlotIndices,
+      schedule,
+    };
+  }
+
+  if (completedSet.has(activeSlotIndex)) {
+    return {
+      canLogNow: false,
+      reason: "already_logged",
+      activeSlotIndex,
+      completedSlotIndices,
+      schedule,
+    };
+  }
+
+  return {
+    canLogNow: true,
+    reason: "ok",
+    activeSlotIndex,
+    completedSlotIndices,
+    schedule,
+  };
+};
+
+const normalizeHabit = (habit) => {
+  const parsedIntervalMinutes = Number(habit.intervalMinutes ?? Number(habit.intervalHours ?? 1) * 60);
+  const intervalMinutes =
+    Number.isFinite(parsedIntervalMinutes) && parsedIntervalMinutes > 0
+      ? parsedIntervalMinutes
+      : 30;
+  const parsedSkipWeekdays = Array.isArray(habit.skipWeekdays)
+    ? habit.skipWeekdays.map(Number).filter((value) => Number.isInteger(value) && value >= 0 && value <= 6)
+    : [];
+
+  return {
+    id: habit.id ?? `h${Date.now()}`,
+    name: habit.name ?? "",
+    description: habit.description ?? "",
+    frequency: habit.frequency ?? "Daily",
+    color: habit.color ?? "#59a7ff",
+    completions: habit.completions ?? {},
+    type: habit.type ?? "standard",
+    targetDate: habit.targetDate ?? "",
+    intervalMinutes,
+    startTime: habit.startTime ?? "09:00",
+    endTime: habit.endTime ?? "21:00",
+    skipWeekdays: [...new Set(parsedSkipWeekdays)],
+    skippedDates: habit.skippedDates ?? {},
+    timedLogs: habit.timedLogs ?? {},
+    timedProgress: habit.timedProgress ?? {},
+  };
+};
+
+const isTimedHabitScheduledOnDate = (habit, date) => {
+  if (habit?.type !== "timed") return false;
+  if (habit.targetDate && habit.targetDate !== date) return false;
+  if (habit.skippedDates?.[date]) return false;
+
+  const parsedDate = new Date(`${date}T00:00:00`);
+  const dayOfWeek = parsedDate.getDay();
+  if (habit.skipWeekdays?.includes(dayOfWeek)) return false;
+  return true;
+};
+
+const getTimedDailyGoal = (habit, date = todayISO()) => {
+  if (!isTimedHabitScheduledOnDate(habit, date)) return 0;
+  return getScheduleMinutes(habit).length;
+};
+
+const getTimedProgressCount = (habit, date = todayISO()) => {
+  const logsForDate = getNormalizedTimedLogsForDate(habit, date);
+  const legacyProgress = Number(habit.timedProgress?.[date] ?? 0);
+  return Math.max(logsForDate.length, Number.isFinite(legacyProgress) ? legacyProgress : 0);
+};
+
+const getTimedCompletedSlotIndices = (habit, date = todayISO()) => getNormalizedTimedLogsForDate(habit, date);
+
+const isHabitDoneOnDate = (habit, date) => {
+  if (habit.type === "timed") {
+    if (!isTimedHabitScheduledOnDate(habit, date)) {
+      return Boolean(habit.skippedDates?.[date]);
+    }
+    const goal = getTimedDailyGoal(habit, date);
+    if (goal === 0) return false;
+    return getTimedProgressCount(habit, date) >= goal;
+  }
+  return Boolean(habit.completions?.[date]);
+};
 
 const readStoredSheetId = () => {
   if (typeof window === "undefined") return "";
@@ -117,6 +299,16 @@ const parseCompletionJson = (value) => {
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
+  }
+};
+
+const parseArrayJson = (value) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 };
 
@@ -217,7 +409,7 @@ export function HabitProvider({ children }) {
       }
 
       await apiRequest(
-        `/${targetSheetId}/values/${HABIT_SHEET_NAME}!A1:F1?valueInputOption=RAW`,
+        `/${targetSheetId}/values/${HABIT_SHEET_NAME}!A1:P1?valueInputOption=RAW`,
         {
           method: "PUT",
           body: JSON.stringify({ values: [HABIT_HEADERS] }),
@@ -230,7 +422,7 @@ export function HabitProvider({ children }) {
   const readHabitsFromSheet = useCallback(
     async (targetSheetId) => {
       await ensureHabitSheet(targetSheetId);
-      const data = await apiRequest(`/${targetSheetId}/values/${HABIT_SHEET_NAME}!A2:F`);
+      const data = await apiRequest(`/${targetSheetId}/values/${HABIT_SHEET_NAME}!A2:P`);
       const values = data.values ?? [];
 
       return values.map((row) =>
@@ -241,6 +433,16 @@ export function HabitProvider({ children }) {
           frequency: row[3],
           color: row[4],
           completions: parseCompletionJson(row[5]),
+          type: row[6] || "standard",
+          intervalMinutes: row[7] ? Number(row[7]) : undefined,
+          startTime: row[8] || "09:00",
+          endTime: row[9] || "21:00",
+          skipWeekdays: parseArrayJson(row[10]),
+          skippedDates: parseCompletionJson(row[11]),
+          timedLogs: parseCompletionJson(row[12]),
+          targetDate: row[13] || "",
+          intervalHours: row[14] ? Number(row[14]) : undefined,
+          timedProgress: parseCompletionJson(row[15]),
         })
       );
     },
@@ -254,7 +456,7 @@ export function HabitProvider({ children }) {
       await apiRequest(`/${targetSheetId}/values:batchClear`, {
         method: "POST",
         body: JSON.stringify({
-          ranges: [`${HABIT_SHEET_NAME}!A2:F`],
+          ranges: [`${HABIT_SHEET_NAME}!A2:P`],
         }),
       });
 
@@ -267,10 +469,20 @@ export function HabitProvider({ children }) {
         habit.frequency,
         habit.color,
         JSON.stringify(habit.completions ?? {}),
+        habit.type ?? "standard",
+        habit.intervalMinutes ?? 30,
+        habit.startTime ?? "09:00",
+        habit.endTime ?? "21:00",
+        JSON.stringify(habit.skipWeekdays ?? []),
+        JSON.stringify(habit.skippedDates ?? {}),
+        JSON.stringify(habit.timedLogs ?? {}),
+        habit.targetDate ?? "",
+        (habit.intervalMinutes ?? 30) / 60,
+        JSON.stringify(habit.timedProgress ?? {}),
       ]);
 
       await apiRequest(
-        `/${targetSheetId}/values/${HABIT_SHEET_NAME}!A2:F?valueInputOption=RAW`,
+        `/${targetSheetId}/values/${HABIT_SHEET_NAME}!A2:P?valueInputOption=RAW`,
         {
           method: "PUT",
           body: JSON.stringify({ values: rows }),
@@ -489,9 +701,98 @@ export function HabitProvider({ children }) {
   const toggleCompletion = (habitId, date = todayISO()) => {
     const nextHabits = habits.map((habit) => {
       if (habit.id !== habitId) return habit;
+      if (habit.type === "timed") return habit;
       const completions = { ...habit.completions };
       completions[date] = !completions[date];
       return { ...habit, completions };
+    });
+    writeHabits(nextHabits);
+  };
+
+  const logTimedCompletion = (habitId, date = todayISO()) => {
+    const nextHabits = habits.map((habit) => {
+      if (habit.id !== habitId || habit.type !== "timed") return habit;
+      const logState = getTimedLogState(habit, date);
+      if (!logState.canLogNow) return habit;
+
+      const timedLogs = { ...(habit.timedLogs ?? {}) };
+      const existingLogs = Array.isArray(timedLogs[date]) ? [...timedLogs[date]] : [];
+      const validExistingLogs = existingLogs.filter(
+        (entry) => entry && typeof entry === "object" && Number.isInteger(entry.slotIndex)
+      );
+      const nextLogs = [
+        ...validExistingLogs,
+        { slotIndex: logState.activeSlotIndex, completedAt: new Date().toISOString() },
+      ].sort((a, b) => a.slotIndex - b.slotIndex);
+      timedLogs[date] = nextLogs;
+
+      const goal = getTimedDailyGoal(habit, date);
+      const progress = nextLogs.length;
+      const timedProgress = { ...habit.timedProgress, [date]: progress };
+      const completions = { ...habit.completions };
+      if (progress >= goal && goal > 0) {
+        completions[date] = true;
+      } else {
+        delete completions[date];
+      }
+
+      return { ...habit, timedLogs, timedProgress, completions };
+    });
+    writeHabits(nextHabits);
+  };
+
+  const undoTimedCompletion = (habitId, date = todayISO()) => {
+    const nextHabits = habits.map((habit) => {
+      if (habit.id !== habitId || habit.type !== "timed") return habit;
+      const timedLogs = { ...(habit.timedLogs ?? {}) };
+      const currentLogs = Array.isArray(timedLogs[date]) ? [...timedLogs[date]] : [];
+      const normalizedSlotIndices = getNormalizedTimedLogsForDate(habit, date);
+      if (normalizedSlotIndices.length === 0) return habit;
+      const lastSlotIndex = normalizedSlotIndices[normalizedSlotIndices.length - 1];
+      const nextLogs = currentLogs
+        .filter((entry) => entry && typeof entry === "object" && Number.isInteger(entry.slotIndex))
+        .filter((entry) => entry.slotIndex !== lastSlotIndex);
+      timedLogs[date] = nextLogs;
+
+      const goal = getTimedDailyGoal(habit, date);
+      const timedProgress = { ...habit.timedProgress, [date]: nextLogs.length };
+      const completions = { ...habit.completions };
+      if (nextLogs.length >= goal && goal > 0) {
+        completions[date] = true;
+      } else {
+        delete completions[date];
+      }
+
+      return { ...habit, timedLogs, timedProgress, completions };
+    });
+    writeHabits(nextHabits);
+  };
+
+  const toggleSkipTimedDate = (habitId, date = todayISO()) => {
+    const nextHabits = habits.map((habit) => {
+      if (habit.id !== habitId || habit.type !== "timed") return habit;
+      const skippedDates = { ...(habit.skippedDates ?? {}) };
+      const willSkip = !Boolean(skippedDates[date]);
+      if (willSkip) {
+        skippedDates[date] = true;
+      } else {
+        delete skippedDates[date];
+      }
+
+      const completions = { ...habit.completions };
+      if (willSkip) {
+        completions[date] = true;
+      } else {
+        const goal = getTimedDailyGoal({ ...habit, skippedDates }, date);
+        const progress = getTimedProgressCount(habit, date);
+        if (goal > 0 && progress >= goal) {
+          completions[date] = true;
+        } else {
+          delete completions[date];
+        }
+      }
+
+      return { ...habit, skippedDates, completions };
     });
     writeHabits(nextHabits);
   };
@@ -513,6 +814,16 @@ export function HabitProvider({ children }) {
       updateHabit,
       deleteHabit,
       toggleCompletion,
+      logTimedCompletion,
+      undoTimedCompletion,
+      toggleSkipTimedDate,
+      getTimedDailyGoal,
+      getTimedProgressCount,
+      getTimedCompletedSlotIndices,
+      getTimedLogState,
+      getScheduleMinutes,
+      isHabitDoneOnDate,
+      isTimedHabitScheduledOnDate,
       oauthConfigured,
       tokenClientReady,
       isAuthenticated,

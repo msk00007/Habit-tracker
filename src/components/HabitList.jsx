@@ -1,6 +1,6 @@
+import { useEffect, useState } from "react";
+import { FaCheck, FaForward, FaPen, FaRotateLeft, FaTrash, FaXmark } from "react-icons/fa6";
 import { useHabits } from "../state/HabitContext.jsx";
-
-const todayISO = () => new Date().toISOString().slice(0, 10);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 const normalizeDate = (date) => {
@@ -44,57 +44,179 @@ const getCurrentStreak = (completions = {}, today) => {
   return streak;
 };
 
+const actionButtonClass =
+  "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40";
+
 export default function HabitList() {
-  const { habits, setEditingHabit, toggleCompletion, deleteHabit } = useHabits();
-  const today = todayISO();
+  const {
+    habits,
+    setEditingHabit,
+    toggleCompletion,
+    deleteHabit,
+    logTimedCompletion,
+    undoTimedCompletion,
+    toggleSkipTimedDate,
+    getTimedDailyGoal,
+    getTimedProgressCount,
+    getScheduleMinutes,
+    getTimedLogState,
+    isHabitDoneOnDate,
+    isTimedHabitScheduledOnDate,
+  } = useHabits();
+  const [now, setNow] = useState(() => new Date());
+  const today = now.toISOString().slice(0, 10);
+  const todayWeekday = new Date(`${today}T00:00:00`).getDay();
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNow(new Date());
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   if (habits.length === 0) {
-    return <div className="card empty">No habits yet. Add one to begin.</div>;
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-600 shadow-sm">
+        No habits yet. Add one to begin.
+      </div>
+    );
   }
 
   return (
-    <div className="habit-list">
+    <div className="grid gap-3">
       {habits.map((habit) => {
-        const isDone = habit.completions?.[today];
+        const isTimed = habit.type === "timed";
+        const isDone = isHabitDoneOnDate(habit, today);
         const currentStreak = getCurrentStreak(habit.completions, today);
         const bestStreak = getLongestStreak(habit.completions);
+        const timedGoal = getTimedDailyGoal(habit, today);
+        const timedProgress = getTimedProgressCount(habit, today);
+        const scheduleMinutes = getScheduleMinutes(habit);
+        const isScheduledToday = isTimedHabitScheduledOnDate(habit, today);
+        const isSkippedToday =
+          Boolean(habit.skippedDates?.[today]) || habit.skipWeekdays?.includes(todayWeekday);
+        const logState = getTimedLogState(habit, today);
+
+        const previewSchedule = scheduleMinutes
+          .slice(0, 3)
+          .map((minute) => {
+            const hours = Math.floor(minute / 60);
+            const mins = minute % 60;
+            const date = new Date();
+            date.setHours(hours, mins, 0, 0);
+            return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          })
+          .join(" • ");
+
         return (
-          <article key={habit.id} className="card habit-card">
-            <div className="habit-card__header">
-              <div
-                className="habit-color"
-                style={{ backgroundColor: habit.color }}
-                aria-hidden="true"
-              />
-              <div>
-                <h3>{habit.name}</h3>
-                <p>{habit.description}</p>
+          <article key={habit.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="h-11 w-2 rounded-full" style={{ backgroundColor: habit.color }} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate text-base font-semibold text-slate-900">{habit.name}</h3>
+                <p className="mt-0.5 text-sm text-slate-600">{habit.description || "No description"}</p>
               </div>
             </div>
-            <div className="habit-meta">
-              <span className="tag">{habit.frequency}</span>
-              <span className="tag">
-                {currentStreak} current / {bestStreak} best
+
+            <div className="mt-3 flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-cyan-100 px-2.5 py-1 font-semibold text-cyan-800">
+                {isTimed ? "Timed habit" : habit.frequency}
               </span>
-              <span className={isDone ? "status done" : "status pending"}>
-                {isDone ? "Completed today" : "Not completed"}
+              {isTimed ? (
+                <>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                    Every {habit.intervalMinutes}m ({timedProgress}/{timedGoal})
+                  </span>
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                    {habit.startTime} - {habit.endTime}
+                  </span>
+                  {previewSchedule && (
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                      {previewSchedule}
+                    </span>
+                  )}
+                </>
+              ) : (
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 font-semibold text-slate-700">
+                  {currentStreak} current / {bestStreak} best
+                </span>
+              )}
+              <span
+                className={`rounded-full px-2.5 py-1 font-semibold ${
+                  isDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                }`}
+              >
+                {isTimed
+                  ? isSkippedToday
+                    ? "Skipped today"
+                    : isDone
+                      ? "All slots complete"
+                      : isScheduledToday
+                        ? logState.canLogNow
+                          ? "Current slot open"
+                          : "Waiting for slot"
+                        : "Not scheduled today"
+                  : isDone
+                    ? "Completed today"
+                    : "Pending"}
               </span>
             </div>
-            <div className="habit-actions">
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {isTimed ? (
+                <>
+                  <button
+                    className={actionButtonClass}
+                    onClick={() => logTimedCompletion(habit.id)}
+                    disabled={!logState.canLogNow || isSkippedToday}
+                    aria-label="Log timed completion"
+                    title="Log timed completion"
+                  >
+                    <FaCheck />
+                  </button>
+                  <button
+                    className={actionButtonClass}
+                    onClick={() => undoTimedCompletion(habit.id)}
+                    disabled={timedProgress === 0}
+                    aria-label="Undo timed completion"
+                    title="Undo timed completion"
+                  >
+                    <FaRotateLeft />
+                  </button>
+                  <button
+                    className={actionButtonClass}
+                    onClick={() => toggleSkipTimedDate(habit.id)}
+                    aria-label={isSkippedToday ? "Unskip today" : "Skip today"}
+                    title={isSkippedToday ? "Unskip today" : "Skip today"}
+                  >
+                    {isSkippedToday ? <FaXmark /> : <FaForward />}
+                  </button>
+                </>
+              ) : (
+                <button
+                  className={actionButtonClass}
+                  onClick={() => toggleCompletion(habit.id)}
+                  aria-label={isDone ? "Undo completion" : "Mark completed"}
+                  title={isDone ? "Undo completion" : "Mark completed"}
+                >
+                  {isDone ? <FaRotateLeft /> : <FaCheck />}
+                </button>
+              )}
               <button
-                className="btn primary"
-                onClick={() => toggleCompletion(habit.id)}
-              >
-                {isDone ? "Undo" : "Mark done"}
-              </button>
-              <button
-                className="btn ghost"
+                className={actionButtonClass}
                 onClick={() => setEditingHabit(habit)}
+                aria-label="Edit habit"
+                title="Edit habit"
               >
-                Edit
+                <FaPen />
               </button>
-              <button className="btn danger" onClick={() => deleteHabit(habit.id)}>
-                Delete
+              <button
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 transition hover:bg-rose-100"
+                onClick={() => deleteHabit(habit.id)}
+                aria-label="Delete habit"
+                title="Delete habit"
+              >
+                <FaTrash />
               </button>
             </div>
           </article>
