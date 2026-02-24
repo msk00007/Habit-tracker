@@ -4,6 +4,7 @@ import HabitForm from "../components/HabitForm.jsx";
 import HabitList from "../components/HabitList.jsx";
 import SheetConfig from "../components/SheetConfig.jsx";
 import {
+  getOneSignalSubscriptionId,
   getNotificationPermissionState,
   initOneSignal,
   isOneSignalConfigured,
@@ -13,6 +14,8 @@ import { useHabits } from "../state/HabitContext.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const REMINDER_CACHE_KEY = "habit_tracker_sent_reminder_keys";
+const REMINDER_SCHEDULE_ENDPOINT = "/.netlify/functions/schedule-reminders";
+const MAX_PUSH_REMINDERS_PER_SYNC = 80;
 
 const formatTimeLabel = (date) => {
   try {
@@ -108,6 +111,58 @@ export default function Habits() {
       active = false;
     };
   }, [oneSignalEnabled]);
+
+  useEffect(() => {
+    if (!oneSignalEnabled || permissionState !== "granted") return;
+    if (activeTimedHabits.length === 0) return;
+
+    let cancelled = false;
+
+    const schedulePushReminders = async () => {
+      const subscriptionId = await getOneSignalSubscriptionId();
+      if (!subscriptionId || cancelled) return;
+
+      const now = new Date();
+      const today = todayISO();
+      const reminders = [];
+
+      for (const habit of activeTimedHabits) {
+        const scheduleMinutes = getScheduleMinutes(habit);
+        for (const minuteOfDay of scheduleMinutes) {
+          const slot = new Date(`${today}T00:00:00`);
+          slot.setHours(Math.floor(minuteOfDay / 60), minuteOfDay % 60, 0, 0);
+          if (slot <= now) continue;
+
+          reminders.push({
+            title: "Habit reminder",
+            message: `${habit.name}: it is time for this check-in. Open HabitTracker and log your slot.`,
+            sendAfter: slot.toISOString(),
+            idempotencyKey: `${subscriptionId}-${habit.id}-${today}-${minuteOfDay}`,
+          });
+
+          if (reminders.length >= MAX_PUSH_REMINDERS_PER_SYNC) break;
+        }
+        if (reminders.length >= MAX_PUSH_REMINDERS_PER_SYNC) break;
+      }
+
+      if (reminders.length === 0 || cancelled) return;
+
+      try {
+        await fetch(REMINDER_SCHEDULE_ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ subscriptionId, reminders }),
+        });
+      } catch {
+        // Scheduling failures should not block UI usage.
+      }
+    };
+
+    void schedulePushReminders();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTimedHabits, getScheduleMinutes, oneSignalEnabled, permissionState]);
 
   const activeTimedHabits = useMemo(() => {
     const today = todayISO();

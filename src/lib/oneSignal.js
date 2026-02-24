@@ -128,3 +128,18 @@ export const requestOneSignalPermission = async () => {
     });
   });
 };
+
+export const getOneSignalSubscriptionId = async () => {
+  if (!canUseBrowserNotifications() || !isOneSignalConfigured()) return "";
+  await initOneSignal();
+  return new Promise((resolve) => {
+    ensureDeferredQueue().push(async (OneSignal) => {
+      try {
+        const subscriptionId = OneSignal?.User?.PushSubscription?.id;
+        resolve(typeof subscriptionId === "string" ? subscriptionId : "");
+      } catch {
+        resolve("");
+      }
+    });
+  });
+};
