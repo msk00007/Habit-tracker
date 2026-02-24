@@ -52,8 +52,9 @@ export const handler = async (event) => {
     const sendAfter = typeof reminder.sendAfter === "string" ? reminder.sendAfter : "";
     const idempotencyKey =
       typeof reminder.idempotencyKey === "string" ? reminder.idempotencyKey.trim() : "";
+    const sendAfterDate = new Date(sendAfter);
 
-    if (!message || !sendAfter || !idempotencyKey) {
+    if (!message || !sendAfter || !idempotencyKey || Number.isNaN(sendAfterDate.getTime())) {
       failed += 1;
       failures.push({ idempotencyKey, reason: "Invalid reminder payload" });
       continue;
@@ -73,7 +74,7 @@ export const handler = async (event) => {
           headings: { en: title },
           contents: { en: message },
           url: "/",
-          send_after: sendAfter,
+          send_after: sendAfterDate.toUTCString(),
           idempotency_key: idempotencyKey,
         }),
       });

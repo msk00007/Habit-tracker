@@ -174,7 +174,13 @@ export default function Habits() {
         }
         const scheduled = Number(data?.scheduled ?? 0);
         const failed = Number(data?.failed ?? 0);
-        setScheduleStatus(`Scheduled ${scheduled} push reminder(s). Failed ${failed}.`);
+        const firstFailureReason =
+          Array.isArray(data?.failures) && data.failures.length > 0
+            ? String(data.failures[0]?.reason ?? "").slice(0, 220)
+            : "";
+        setScheduleStatus(
+          `Scheduled ${scheduled} push reminder(s). Failed ${failed}.${firstFailureReason ? ` First error: ${firstFailureReason}` : ""}`
+        );
       } catch {
         setScheduleStatus("Push scheduling failed: network/function error.");
       }
