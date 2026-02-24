@@ -6,6 +6,21 @@ let initPromise = null;
 
 export const isOneSignalConfigured = () => Boolean(ONE_SIGNAL_APP_ID);
 
+const normalizePermissionState = (value) => {
+  if (value === "granted" || value === "denied" || value === "default") return value;
+  if (value === true) return "granted";
+  if (value === false) {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      return window.Notification.permission;
+    }
+    return "default";
+  }
+  if (typeof window !== "undefined" && "Notification" in window) {
+    return window.Notification.permission;
+  }
+  return "unsupported";
+};
+
 const canUseBrowserNotifications = () =>
   typeof window !== "undefined" && "Notification" in window && window.isSecureContext;
 
@@ -77,9 +92,9 @@ export const getNotificationPermissionState = async () => {
     ensureDeferredQueue().push(async (OneSignal) => {
       try {
         const permission = OneSignal?.Notifications?.permission;
-        resolve(permission ?? window.Notification.permission);
+        resolve(normalizePermissionState(permission));
       } catch {
-        resolve(window.Notification.permission);
+        resolve(normalizePermissionState(window.Notification.permission));
       }
     });
   });
@@ -94,11 +109,11 @@ export const requestOneSignalPermission = async () => {
     ensureDeferredQueue().push(async (OneSignal) => {
       try {
         await OneSignal.Notifications.requestPermission();
-        resolve(OneSignal.Notifications.permission ?? window.Notification.permission);
+        resolve(normalizePermissionState(OneSignal.Notifications.permission));
       } catch {
         try {
           const permission = await window.Notification.requestPermission();
-          resolve(permission);
+          resolve(normalizePermissionState(permission));
         } catch {
           resolve("denied");
         }
