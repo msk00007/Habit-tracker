@@ -66,8 +66,9 @@ export const initOneSignal = async () => {
               await OneSignal.init({
                 appId: ONE_SIGNAL_APP_ID,
                 allowLocalhostAsSecureOrigin: true,
-                serviceWorkerPath: "/OneSignalSDKWorker.js",
-                serviceWorkerUpdaterPath: "/OneSignalSDKUpdaterWorker.js",
+                serviceWorkerPath: "/onesignal/OneSignalSDKWorker.js",
+                serviceWorkerUpdaterPath: "/onesignal/OneSignalSDKUpdaterWorker.js",
+                serviceWorkerParam: { scope: "/onesignal/" },
                 notifyButton: { enable: false },
               });
               resolve(true);

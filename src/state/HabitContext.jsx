@@ -6,6 +6,8 @@ const todayISO = () => new Date().toISOString().slice(0, 10);
 const SHEET_ID_KEY = "habit_tracker_sheet_id";
 const DEMO_MODE_KEY = "habit_tracker_demo_mode";
 const DEMO_HABITS_KEY = "habit_tracker_demo_habits";
+const ACCESS_TOKEN_KEY = "habit_tracker_access_token";
+const ACCESS_TOKEN_EXP_KEY = "habit_tracker_access_token_expires_at";
 const HABIT_SHEET_NAME = "habits";
 const HABIT_HEADERS = [
   "id",
@@ -29,6 +31,7 @@ const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 const SHEETS_API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
+const TOKEN_EXPIRY_BUFFER_MS = 60 * 1000;
 
 const parseTimeToMinutes = (timeValue) => {
   if (typeof timeValue !== "string" || !timeValue.includes(":")) return null;
@@ -221,6 +224,18 @@ const readStoredDemoMode = () => {
   return window.localStorage.getItem(DEMO_MODE_KEY) === "true";
 };
 
+const readStoredAuthSession = () => {
+  if (typeof window === "undefined") return { token: "", expiresAt: 0 };
+  const token = window.localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
+  const expiresAt = Number(window.localStorage.getItem(ACCESS_TOKEN_EXP_KEY) ?? 0);
+  if (!token || !Number.isFinite(expiresAt) || expiresAt <= Date.now() + TOKEN_EXPIRY_BUFFER_MS) {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(ACCESS_TOKEN_EXP_KEY);
+    return { token: "", expiresAt: 0 };
+  }
+  return { token, expiresAt };
+};
+
 const seedDemoHabits = [
   {
     id: "demo-1",
@@ -313,16 +328,18 @@ const parseArrayJson = (value) => {
 };
 
 export function HabitProvider({ children }) {
+  const [initialAuthSession] = useState(readStoredAuthSession);
   const [habits, setHabits] = useState([]);
   const [editingHabit, setEditingHabit] = useState(null);
   const [sheetId, setSheetId] = useState(readStoredSheetId);
   const [isDemoMode, setIsDemoMode] = useState(readStoredDemoMode);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(Boolean(initialAuthSession.token));
   const [authError, setAuthError] = useState("");
   const [userEmail, setUserEmail] = useState("");
-  const [accessToken, setAccessToken] = useState("");
+  const [accessToken, setAccessToken] = useState(initialAuthSession.token);
+  const [accessTokenExpiresAt, setAccessTokenExpiresAt] = useState(initialAuthSession.expiresAt);
   const [tokenClientReady, setTokenClientReady] = useState(false);
 
   const oauthConfigured = Boolean(GOOGLE_CLIENT_ID);
@@ -348,7 +365,12 @@ export function HabitProvider({ children }) {
               reject(new Error(response.error_description || response.error));
               return;
             }
+            const expiresInSeconds = Number(response.expires_in ?? 3600);
+            const expiresAt =
+              Date.now() +
+              (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 ? expiresInSeconds : 3600) * 1000;
             setAccessToken(response.access_token);
+            setAccessTokenExpiresAt(expiresAt);
             setIsAuthenticated(true);
             setAuthError("");
             resolve(response.access_token);
@@ -362,7 +384,10 @@ export function HabitProvider({ children }) {
 
   const apiRequest = useCallback(
     async (path, options = {}) => {
-      if (!accessToken) {
+      if (!accessToken || accessTokenExpiresAt <= Date.now() + TOKEN_EXPIRY_BUFFER_MS) {
+        setIsAuthenticated(false);
+        setAccessToken("");
+        setAccessTokenExpiresAt(0);
         throw new Error("Please sign in with Google first.");
       }
 
@@ -378,6 +403,7 @@ export function HabitProvider({ children }) {
       if (response.status === 401) {
         setIsAuthenticated(false);
         setAccessToken("");
+        setAccessTokenExpiresAt(0);
         throw new Error("Session expired. Please sign in again.");
       }
 
@@ -391,7 +417,7 @@ export function HabitProvider({ children }) {
 
       return data;
     },
-    [accessToken]
+    [accessToken, accessTokenExpiresAt]
   );
 
   const ensureHabitSheet = useCallback(
@@ -585,6 +611,17 @@ export function HabitProvider({ children }) {
   }, [oauthConfigured]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (accessToken && accessTokenExpiresAt > Date.now() + TOKEN_EXPIRY_BUFFER_MS) {
+      window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+      window.localStorage.setItem(ACCESS_TOKEN_EXP_KEY, String(accessTokenExpiresAt));
+      return;
+    }
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+    window.localStorage.removeItem(ACCESS_TOKEN_EXP_KEY);
+  }, [accessToken, accessTokenExpiresAt]);
+
+  useEffect(() => {
     if (accessToken) {
       fetchUserEmail();
     }
@@ -593,10 +630,11 @@ export function HabitProvider({ children }) {
   useEffect(() => {
     if (!tokenClientReady || !oauthConfigured) return;
     if (isDemoMode) return;
+    if (accessToken && accessTokenExpiresAt > Date.now() + TOKEN_EXPIRY_BUFFER_MS) return;
     getFreshAccessToken("")
       .then(() => undefined)
       .catch(() => undefined);
-  }, [getFreshAccessToken, oauthConfigured, tokenClientReady, isDemoMode]);
+  }, [getFreshAccessToken, oauthConfigured, tokenClientReady, isDemoMode, accessToken, accessTokenExpiresAt]);
 
   useEffect(() => {
     loadHabits(sheetId);
@@ -619,6 +657,7 @@ export function HabitProvider({ children }) {
       window.google.accounts.oauth2.revoke(accessToken);
     }
     setAccessToken("");
+    setAccessTokenExpiresAt(0);
     setIsAuthenticated(false);
     setUserEmail("");
     setHabits([]);
@@ -629,6 +668,7 @@ export function HabitProvider({ children }) {
     setIsDemoMode(true);
     setIsAuthenticated(false);
     setAccessToken("");
+    setAccessTokenExpiresAt(0);
     setAuthError("");
     const demoHabits = readDemoHabits();
     saveDemoHabits(demoHabits);
