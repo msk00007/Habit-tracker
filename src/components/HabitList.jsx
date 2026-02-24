@@ -47,6 +47,14 @@ const getCurrentStreak = (completions = {}, today) => {
 const actionButtonClass =
   "inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40";
 
+const formatTimeLabel = (date) => {
+  try {
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+};
+
 export default function HabitList() {
   const {
     habits,
@@ -104,7 +112,7 @@ export default function HabitList() {
             const mins = minute % 60;
             const date = new Date();
             date.setHours(hours, mins, 0, 0);
-            return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+            return formatTimeLabel(date);
           })
           .join(" • ");
 

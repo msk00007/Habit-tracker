@@ -7,6 +7,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.js",
       devOptions: {
         enabled: true,
       },
@@ -40,8 +43,7 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        navigateFallback: "/index.html",
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,json}"],
       },
     }),

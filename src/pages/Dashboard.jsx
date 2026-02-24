@@ -59,6 +59,14 @@ const getLastNDays = (count) => {
   return days;
 };
 
+const formatTimeLabel = (date) => {
+  try {
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+};
+
 export default function Dashboard() {
   const {
     habits,
@@ -152,7 +160,7 @@ export default function Dashboard() {
       !selectedTimedIsSkipped && !done && (isSelectedDatePast || (isSelectedDateToday && now >= slotEnd));
     return {
       id: `${selectedTimedDate}-${minute}`,
-      label: slot.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      label: formatTimeLabel(slot),
       status: selectedTimedIsSkipped ? "skipped" : done ? "done" : missed ? "missed" : "upcoming",
     };
   });

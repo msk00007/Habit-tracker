@@ -7,6 +7,42 @@ import { useHabits } from "../state/HabitContext.jsx";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
+const formatTimeLabel = (date) => {
+  try {
+    return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+};
+
+const canUseWebNotifications = () =>
+  typeof window !== "undefined" && "Notification" in window && window.isSecureContext;
+
+const showHabitNotification = async (body, tag) => {
+  if (!canUseWebNotifications() || window.Notification.permission !== "granted") return;
+  try {
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification("Habit reminder", {
+        body,
+        tag,
+        renotify: true,
+        icon: "/android-chrome-192x192.png",
+        badge: "/android-chrome-192x192.png",
+      });
+      return;
+    }
+  } catch {
+    // Fall back to page notification if service worker path fails.
+  }
+
+  try {
+    new window.Notification("Habit reminder", { body, tag });
+  } catch {
+    // Ignore notification failures on restricted browsers.
+  }
+};
+
 export default function Habits() {
   const {
     hasSheet,
@@ -19,7 +55,7 @@ export default function Habits() {
     isTimedHabitScheduledOnDate,
   } = useHabits();
   const [permissionState, setPermissionState] = useState(
-    typeof window !== "undefined" && "Notification" in window ? window.Notification.permission : "unsupported"
+    canUseWebNotifications() ? window.Notification.permission : "unsupported"
   );
   const [reminderText, setReminderText] = useState("");
   const lastReminderRef = useRef({});
@@ -32,18 +68,18 @@ export default function Habits() {
   useEffect(() => {
     if (permissionState === "unsupported") return undefined;
 
-    const runReminderCheck = () => {
+    const runReminderCheck = async () => {
       const now = new Date();
       const today = todayISO();
       let latestMessage = "";
 
-      activeTimedHabits.forEach((habit) => {
+      for (const habit of activeTimedHabits) {
         const goal = getTimedDailyGoal(habit, today);
         const progress = getTimedProgressCount(habit, today);
-        if (progress >= goal) return;
+        if (progress >= goal) continue;
 
         const scheduleMinutes = getScheduleMinutes(habit);
-        if (scheduleMinutes.length === 0) return;
+        if (scheduleMinutes.length === 0) continue;
 
         const slotTimes = scheduleMinutes.map((minuteOfDay) => {
           const slot = new Date(`${today}T00:00:00`);
@@ -51,40 +87,37 @@ export default function Habits() {
           return slot;
         });
         const dueSlots = slotTimes.filter((slot) => slot <= now);
-        if (dueSlots.length === 0) return;
+        if (dueSlots.length === 0) continue;
 
         const expectedNow = Math.min(goal, dueSlots.length);
-        if (progress >= expectedNow) return;
+        if (progress >= expectedNow) continue;
 
         const reminderKey = `${habit.id}-${today}-${expectedNow}`;
-        if (lastReminderRef.current[reminderKey]) return;
+        if (lastReminderRef.current[reminderKey]) continue;
 
-        const dueTime = dueSlots[dueSlots.length - 1].toLocaleTimeString([], {
-          hour: "numeric",
-          minute: "2-digit",
-        });
+        const dueTime = formatTimeLabel(dueSlots[dueSlots.length - 1]);
         const nextSlot = slotTimes.find((slot) => slot > now);
-        const nextLabel = nextSlot ? nextSlot.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "none";
+        const nextLabel = nextSlot ? formatTimeLabel(nextSlot) : "none";
         const behindBy = expectedNow - progress;
         const message = `${habit.name}: check-in due at ${dueTime}. Logged ${progress}/${goal}, behind by ${behindBy}. Next at ${nextLabel}.`;
         latestMessage = message;
 
-        if (typeof window !== "undefined" && window.Notification?.permission === "granted") {
-          new window.Notification("Habit reminder", { body: message });
-        }
+        await showHabitNotification(message, reminderKey);
         lastReminderRef.current[reminderKey] = true;
-      });
+      }
 
       if (latestMessage) setReminderText(latestMessage);
     };
 
-    runReminderCheck();
-    const intervalId = window.setInterval(runReminderCheck, 60000);
+    void runReminderCheck();
+    const intervalId = window.setInterval(() => {
+      void runReminderCheck();
+    }, 60000);
     return () => window.clearInterval(intervalId);
   }, [activeTimedHabits, getTimedDailyGoal, getTimedProgressCount, getScheduleMinutes, permissionState]);
 
   const requestNotifications = async () => {
-    if (typeof window === "undefined" || !window.Notification) return;
+    if (!canUseWebNotifications()) return;
     const permission = await window.Notification.requestPermission();
     setPermissionState(permission);
   };
@@ -117,7 +150,7 @@ export default function Habits() {
                   : permissionState === "denied"
                     ? "Browser notifications are blocked. You can allow them in browser settings."
                     : permissionState === "unsupported"
-                      ? "This browser does not support notifications."
+                      ? "Notifications need a secure context (HTTPS or localhost) and browser support."
                       : "Enable notifications to get timely reminders."}
               </p>
               {reminderText && (
