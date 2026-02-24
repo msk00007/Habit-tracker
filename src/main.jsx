@@ -6,7 +6,9 @@ import App from "./App.jsx";
 import { HabitProvider } from "./state/HabitContext.jsx";
 import "./index.css";
 
-registerSW({ immediate: true });
+if (!import.meta.env.VITE_ONESIGNAL_APP_ID) {
+  registerSW({ immediate: true });
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
